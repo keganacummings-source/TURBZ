@@ -8,27 +8,6 @@ export type MapTile = WorldTile & {
   sprite?: string;
 };
 
-export type MapTeleporter = {
-  id: string;
-  tx: number;
-  ty: number;
-  /** Shared link number — portals with the same number connect across maps. */
-  link: number;
-  label?: string;
-  targetMap?: string;
-};
-
-export type MapSpawner = {
-  id: string;
-  tx: number;
-  ty: number;
-  species?: string;
-  level: number;
-  interval?: number;
-  maxAlive?: number;
-  boss?: boolean;
-};
-
 export type MapFile = {
   version: number;
   id: string;
@@ -39,8 +18,6 @@ export type MapFile = {
   tiles: MapTile[];
   spawns?: Spawn[];
   spawn?: { tx: number; ty: number };
-  teleporters?: MapTeleporter[];
-  spawners?: MapSpawner[];
   notes?: string;
 };
 
@@ -90,8 +67,6 @@ export function emptyMap(id: string, name: string, w: number, h: number, floor =
     tiles,
     spawns: [],
     spawn: { tx: Math.floor(w / 2), ty: Math.floor(h / 2) },
-    teleporters: [],
-    spawners: [],
   };
 }
 
@@ -130,75 +105,52 @@ export function tileSlow(world: WorldData, x: number, y: number): number {
 }
 
 export function parseMapJson(raw: unknown): MapFile {
-  if (!raw || typeof raw !== "object") throw new Error("Map file is empty or invalid");
-  const m = raw as Record<string, unknown>;
-  const w = Number(m.w) | 0;
-  const h = Number(m.h) | 0;
-  if (w < 4 || h < 4 || w > 512 || h > 512) throw new Error("Map size out of range");
-  let tilesIn = m.tiles as unknown;
-  // Support RLE compact maps: tilesRle = [count, floor, biome, block, decor, sprite][]
-  if ((!Array.isArray(tilesIn) || (tilesIn as unknown[]).length !== w * h) && Array.isArray(m.tilesRle)) {
-    const expanded: Record<string, unknown>[] = [];
-    for (const row of m.tilesRle as unknown[]) {
-      if (!Array.isArray(row) || row.length < 5) continue;
-      const count = Math.max(0, Number(row[0]) | 0);
-      const tile = {
-        floor: Number(row[1]) | 0,
-        biome: Number(row[2]) | 0,
-        block: Number(row[3]) | 0,
-        decor: Number(row[4]) | 0,
-        sprite: typeof row[5] === "string" ? row[5] : undefined,
-      };
-      for (let i = 0; i < count; i++) expanded.push(tile);
-    }
-    tilesIn = expanded;
+  if (!raw || typeof raw !== "object") throw new Error("Map file is empty or invalid.");
+  const m = raw as Partial<MapFile>;
+  if (typeof m.w !== "number" || typeof m.h !== "number") throw new Error("Map needs w and h.");
+  if (!Array.isArray(m.tiles) || m.tiles.length !== m.w * m.h) {
+    throw new Error(`Map tiles length must be w*h (${m.w! * m.h!}), got ${m.tiles?.length ?? 0}.`);
   }
-  if (!Array.isArray(tilesIn) || (tilesIn as unknown[]).length !== w * h) throw new Error("tiles array size mismatch");
-  const tiles: MapTile[] = (tilesIn as unknown[]).map((t) => {
-    const o = (t && typeof t === "object" ? t : {}) as Record<string, unknown>;
-    return {
-      floor: Number(o.floor) | 0,
-      biome: Number(o.biome) | 0,
-      block: Number(o.block) | 0,
-      decor: Number(o.decor) | 0,
-      sprite: typeof o.sprite === "string" ? o.sprite : undefined,
-    };
-  });
-  const spawnRaw = m.spawn && typeof m.spawn === "object" ? (m.spawn as Record<string, unknown>) : null;
   return {
-    version: Number(m.version) || MAP_VERSION,
-    id: String(m.id || "map"),
-    name: String(m.name || "Untitled"),
-    w,
-    h,
-    tileSize: Number(m.tileSize) || TILE,
-    tiles,
-    spawns: Array.isArray(m.spawns) ? (m.spawns as import("./world").Spawn[]) : [],
-    teleporters: Array.isArray(m.teleporters) ? (m.teleporters as import("./map-format").MapTeleporter[]) : [],
-    spawners: Array.isArray(m.spawners) ? (m.spawners as import("./map-format").MapSpawner[]) : [],
-    spawn: spawnRaw
-      ? { tx: Number(spawnRaw.tx) | 0, ty: Number(spawnRaw.ty) | 0 }
-      : { tx: Math.floor(w / 2), ty: Math.floor(h / 2) },
-    notes: typeof m.notes === "string" ? m.notes : undefined,
+    version: m.version ?? MAP_VERSION,
+    id: m.id ?? "custom",
+    name: m.name ?? "Custom Map",
+    w: m.w,
+    h: m.h,
+    tileSize: m.tileSize ?? TILE,
+    tiles: m.tiles.map((t) => ({
+      floor: Number(t.floor) || 0,
+      biome: Number(t.biome) || 0,
+      block: Number(t.block) || 0,
+      decor: Number(t.decor) || 0,
+      sprite: typeof t.sprite === "string" ? t.sprite : undefined,
+    })),
+    spawns: Array.isArray(m.spawns) ? (m.spawns as Spawn[]) : [],
+    spawn: m.spawn,
+    notes: m.notes,
   };
 }
 
-export function downloadMapFile(map: MapFile) {
+export function downloadMapFile(map: MapFile): void {
   const blob = new Blob([JSON.stringify(map, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
+  a.href = url;
   a.download = `${map.id || "map"}.json`;
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(a.href);
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 export async function fetchMapFile(id: string): Promise<MapFile | null> {
   try {
-    const res = await fetch(`/Maps/${id}.json`, { cache: "force-cache" });
+    const res = await fetch(`/Maps/${id}.json`, { cache: "no-cache" });
     if (!res.ok) return null;
-    const raw = await res.json();
-    return parseMapJson(raw);
+    return parseMapJson(await res.json());
   } catch {
     return null;
   }
 }
+
+export { TILE, WORLD_W, WORLD_H };

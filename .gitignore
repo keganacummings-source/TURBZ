@@ -6,10 +6,3 @@ node_modules/
 
 dist-static/
 .wrangler/
-
-# build output / local tooling
-.vercel/
-.node_modules.lock
-.grok/preview.log
-attachments/
-dist/

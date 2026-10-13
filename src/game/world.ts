@@ -514,7 +514,11 @@ export function paintWorld(world: WorldData): HTMLCanvasElement {
       if (t.decor === 1) paintTree(g, x * TILE + 16, y * TILE + 28);
     }
   }
-  // Resource-node trees are drawn live by resource-nodes.ts so they can vanish when harvested.
+  for (const p of POIS) {
+    if (p.kind !== "node" || p.node !== "tree") continue;
+    const at = scaleTile(p.tx, p.ty);
+    paintTree(g, at.tx * TILE + 16, at.ty * TILE + 26);
+  }
   for (const p of POIS) {
     if (p.kind !== "shrine" && p.kind !== "dungeon") continue;
     const at = scaleTile(p.tx, p.ty);
@@ -599,6 +603,12 @@ export function drawWorldSlice(
       const t = world.tiles[idx(x, y, world.w)]!;
       if (t.decor === 1) paintTree(ctx, x * TILE + 16, y * TILE + 28);
     }
+  }
+  for (const p of POIS) {
+    if (p.kind !== "node" || p.node !== "tree") continue;
+    const at = scaleTile(p.tx, p.ty);
+    if (at.tx < x0 || at.tx > x1 || at.ty < y0 || at.ty > y1) continue;
+    paintTree(ctx, at.tx * TILE + 16, at.ty * TILE + 26);
   }
   for (const p of POIS) {
     if (p.kind !== "shrine" && p.kind !== "dungeon") continue;

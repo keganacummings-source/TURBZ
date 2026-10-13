@@ -60,7 +60,6 @@ import {
 } from "./content";
 import type { GraveBody } from "./social-types";
 import { drawActor, drawMonster, drawSetAura, drawShadowName, fxColor } from "./sprites";
-import { drawResourceNode, NODE_RESPAWN_SECONDS, NODE_RESPAWN_SECONDS_HARDCORE } from "./resource-nodes";
 import {
   BIOME_LABEL,
   TAVERNS,
@@ -306,7 +305,6 @@ export class TurbzGame {
 		this.chat = [];
 		this.seenSwing = new Map();
 		this.nodeCd = {};
-		this.nodeApp = {};
 		this.path = [];
 		this.shopStock = [];
 		this.zoom = 2.35;
@@ -631,7 +629,6 @@ export class TurbzGame {
 		this.remotes = this.remotes ?? new Map();
 		this.seenSwing = this.seenSwing ?? new Map();
 		this.nodeCd = this.nodeCd ?? {};
-		this.nodeApp = this.nodeApp ?? {};
 		this.keys = this.keys ?? new Set();
 		this.qa = this.qa ?? new Set();
 		this.loadMap(save.map, false);
@@ -1043,19 +1040,24 @@ export class TurbzGame {
 		const save = this.save;
 		let best = null;
 		let bd = 1e9;
+		let any = null;
+		let ad = 1e9;
 		for (const p of POIS) {
 			if (p.kind !== "node" || p.node !== node) continue;
 			const pos = poiPos(p);
 			if (!pos) continue;
 			const d = Math.hypot(pos.x - save.x, pos.y - save.y);
+			if (d < ad) {
+				ad = d;
+				any = pos;
+			}
 			if ((this.nodeCd[p.id] ?? 0) > 2) continue;
 			if (d < bd) {
 				bd = d;
 				best = pos;
 			}
 		}
-		// Depleted nodes are invisible, so never send the player walking to one.
-		return best;
+		return best ?? any;
 	}
 	walkTo(x, y) {
 		const save = this.save;
@@ -2113,35 +2115,11 @@ export class TurbzGame {
 			if (!pos) continue;
 			if (Math.hypot(pos.x - save.x, pos.y - save.y) > 64) continue;
 			if ((this.nodeCd[p.id] ?? 0) > 0) continue;
-			if ((this.nodeApp[p.id] ?? 1) < 0.6) continue;
 			this.harvestNow(p.id, p.node);
 		}
 	}
-	depleteNode(id) {
-		this.nodeCd[id] = this.rules === "hardcore" ? NODE_RESPAWN_SECONDS_HARDCORE : NODE_RESPAWN_SECONDS;
-		this.nodeApp[id] = 0;
-		const poi = POIS.find((q) => q.kind === "node" && q.id === id);
-		const pos = poi ? poiPos(poi) : null;
-		if (!pos) return;
-		const color = poi.node === "ore" ? "#c8c0b8" : poi.node === "tree" ? "#6aaa4a" : poi.node === "shroom" ? "#c9a6ff" : "#9ad8ff";
-		for (let i = 0; i < 14; i++) {
-			const a = Math.random() * Math.PI * 2;
-			const sp = 40 + Math.random() * 70;
-			this.parts.push({
-				x: pos.x,
-				y: pos.y - 12,
-				vx: Math.cos(a) * sp,
-				vy: Math.sin(a) * sp - 30,
-				life: .5,
-				max: .5,
-				color,
-				size: 3,
-				kind: "burst"
-			});
-		}
-	}
 	harvestNow(id, node) {
-		this.depleteNode(id);
+		this.nodeCd[id] = this.rules === "hardcore" ? 7 : 14;
 		const luck = 1 + this.chan("harvest") / 100;
 		if (node === "ore") {
 			const n = Math.max(1, Math.floor((1 + Math.random()) * luck));
@@ -2393,11 +2371,7 @@ export class TurbzGame {
 		}
 		this.floats = this.floats.filter((f) => f.life > 0);
 		this.shake = Math.max(0, this.shake - dt * 18);
-		for (const id of Object.keys(this.nodeCd)) {
-			this.nodeCd[id] = Math.max(0, (this.nodeCd[id] ?? 0) - dt);
-			// Depleted nodes vanish (appear = 0) and grow back in once they respawn.
-			this.nodeApp[id] = this.nodeCd[id] > 0 ? 0 : Math.min(1, (this.nodeApp[id] ?? 0) + dt * 2.2);
-		}
+		for (const id of Object.keys(this.nodeCd)) this.nodeCd[id] = Math.max(0, (this.nodeCd[id] ?? 0) - dt);
 	}
 	playMoveFx(move, x0, y0, x1, y1) {
 		const color = TYPES[move.type].color;
@@ -2540,8 +2514,8 @@ export class TurbzGame {
 		}
 	}
 	startNode(id, node) {
-		if ((this.nodeCd[id] ?? 0) > 0 || (this.nodeApp[id] ?? 1) < 0.6) {
-			this.say("Already gathered. It is growing back.");
+		if ((this.nodeCd[id] ?? 0) > 0) {
+			this.say("Already gathered.");
 			return;
 		}
 		const skill = node === "ore" ? "mining" : node === "tree" ? "woodcutting" : node === "shroom" ? "shroom" : "fishing";
@@ -2560,7 +2534,7 @@ export class TurbzGame {
 		this.channel = null;
 		if (!ch) return;
 		const [node, id] = ch.kind.split(":");
-		this.depleteNode(id ?? "");
+		this.nodeCd[id ?? ""] = 12;
 		const luck = 1 + this.chan("harvest") / 100;
 		if (node === "ore") {
 			const n = Math.max(1, Math.floor((1 + Math.random()) * luck));
@@ -3908,16 +3882,6 @@ export class TurbzGame {
 					time: this.clock
 				});
 				drawShadowName(ctx, npc.name.split(" ").slice(-1)[0], pos.x, pos.y - 62, "#f0e2c8");
-			} else if (p.kind === "node") {
-				if (Math.abs(pos.x - this.cam.x) > w / this.zoom * 0.62 + 120) continue;
-				if (Math.abs(pos.y - this.cam.y) > h / this.zoom * 0.62 + 160) continue;
-				const cd = this.nodeCd[p.id] ?? 0;
-				drawResourceNode(ctx, p.node, p.id, pos.x, pos.y + 8, {
-					t: this.clock,
-					appear: cd > 0 ? 0 : this.nodeApp[p.id] ?? 1,
-					working: !!this.channel && this.channel.kind.endsWith(`:${p.id}`),
-					near: Math.hypot(pos.x - save.x, pos.y - save.y) < 64
-				});
 			}
 		}
 		else {
@@ -4233,7 +4197,6 @@ export class TurbzGame {
 		}
 		for (const p of POIS) {
 			if (p.kind !== "shrine" && p.kind !== "dungeon" && p.kind !== "boss" && p.kind !== "node") continue;
-			if (p.kind === "node" && (this.nodeCd[p.id] ?? 0) > 0) continue;
 			const at = scaleTile(p.tx, p.ty);
 			const mx = at.tx * sx + sx / 2;
 			const my = at.ty * sy + sy / 2;
@@ -4397,25 +4360,15 @@ export class TurbzGame {
 				lines: ["A battle arena. Speak to the keeper at the door.", "A loss here is a knockout, not the veil."],
 				actions: []
 			};
-			if (p.kind === "node") {
-				const name = { ore: "Ore vein", tree: "Tree", shroom: "Mushroom patch", fish: "Fishing spot" }[p.node];
-				const left = Math.ceil(this.nodeCd[p.id] ?? 0);
-				if (left > 0) return {
-					hint: `${name} · regrowing`,
-					title: name,
-					lines: [`Gathered. Back in ${left}s.`],
-					actions: []
-				};
-				return {
-					hint: name,
-					title: name,
-					lines: ["Walk into it, or gather from this menu."],
-					actions: [{
-						id: "gather",
-						label: { ore: "Mine", tree: "Chop", shroom: "Pick", fish: "Fish" }[p.node]
-					}]
-				};
-			}
+			if (p.kind === "node") return {
+				hint: `${p.node} node`,
+				title: p.node,
+				lines: ["Gather with Speak, or from this menu."],
+				actions: [{
+					id: "gather",
+					label: "Gather"
+				}]
+			};
 			if (p.kind === "boss") return {
 				hint: p.name,
 				title: p.name,
