@@ -1,13 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { WitchArena, type ArenaSnap } from "@/game/arena";
-import type { GraveBody } from "@/game/social-types";
 
-export function ArenaScreen(props: {
-  seed: unknown;
-  onClose: () => void;
-  onCloud: (save: unknown | null) => void;
-  onGrave?: (body: GraveBody) => void;
-}) {
+export function ArenaScreen(props: { seed: unknown; onClose: () => void; onCloud: (save: unknown | null) => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const arenaRef = useRef<WitchArena | null>(null);
   const [snap, setSnap] = useState<ArenaSnap | null>(null);
@@ -21,7 +15,6 @@ export function ArenaScreen(props: {
     if (!canvas) return;
     const arena = new WitchArena(canvas);
     arena.onCloud = (save) => cloudRef.current(save);
-    arena.onGrave = (body) => props.onGrave?.(body);
     arenaRef.current = arena;
     const un = arena.subscribe(() => setSnap(arena.getSnap()));
     arena.start(seedRef.current);
